@@ -37,13 +37,12 @@
 #include "gdbsupport/task-group.h"
 #include "gdbsupport/thread-pool.h"
 #include <chrono>
-#include <unordered_set>
 #include "cli/cli-cmds.h"
 
 /* We don't want gdb to exit while it is in the process of writing to
    the index cache.  So, all live cooked index vectors are stored
    here, and then these are all waited for before exit proceeds.  */
-static std::unordered_set<cooked_index *> active_vectors;
+static gdb::unordered_set<cooked_index *> active_vectors;
 
 /* See cooked-index.h.  */
 
@@ -222,10 +221,11 @@ cooked_index_entry::matches (domain_search_flags kind) const
 /* See cooked-index.h.  */
 
 const char *
-cooked_index_entry::full_name (struct obstack *storage, bool for_main,
+cooked_index_entry::full_name (struct obstack *storage,
+			       cooked_index_full_name_flag name_flags,
 			       const char *default_sep) const
 {
-  const char *local_name = for_main ? name : canonical;
+  const char *local_name = ((name_flags & FOR_MAIN) != 0) ? name : canonical;
 
   if ((flags & IS_LINKAGE) != 0 || get_parent () == nullptr)
     return local_name;
@@ -235,12 +235,19 @@ cooked_index_entry::full_name (struct obstack *storage, bool for_main,
     {
     case language_cplus:
     case language_rust:
+    case language_fortran:
       sep = "::";
       break;
 
+    case language_ada:
+      if ((name_flags & FOR_ADA_LINKAGE_NAME) != 0)
+	{
+	  sep = "__";
+	  break;
+	}
+      [[fallthrough]];
     case language_go:
     case language_d:
-    case language_ada:
       sep = ".";
       break;
 
@@ -250,7 +257,12 @@ cooked_index_entry::full_name (struct obstack *storage, bool for_main,
       break;
     }
 
-  get_parent ()->write_scope (storage, sep, for_main);
+  /* The FOR_ADA_LINKAGE_NAME flag should only affect Ada entries, so
+     disable it here if we don't need it.  */
+  if (lang != language_ada)
+    name_flags &= ~FOR_ADA_LINKAGE_NAME;
+
+  get_parent ()->write_scope (storage, sep, name_flags);
   obstack_grow0 (storage, local_name, strlen (local_name));
   return (const char *) obstack_finish (storage);
 }
@@ -260,11 +272,15 @@ cooked_index_entry::full_name (struct obstack *storage, bool for_main,
 void
 cooked_index_entry::write_scope (struct obstack *storage,
 				 const char *sep,
-				 bool for_main) const
+				 cooked_index_full_name_flag flags) const
 {
   if (get_parent () != nullptr)
-    get_parent ()->write_scope (storage, sep, for_main);
-  const char *local_name = for_main ? name : canonical;
+    get_parent ()->write_scope (storage, sep, flags);
+  /* When computing the Ada linkage name, the entry might not have
+     been canonicalized yet, so use the 'name'.  */
+  const char *local_name = ((flags & (FOR_MAIN | FOR_ADA_LINKAGE_NAME)) != 0
+			    ? name
+			    : canonical);
   obstack_grow (storage, local_name, strlen (local_name));
   obstack_grow (storage, sep, strlen (sep));
 }
@@ -272,11 +288,39 @@ cooked_index_entry::write_scope (struct obstack *storage,
 /* See cooked-index.h.  */
 
 cooked_index_entry *
+cooked_index_shard::create (sect_offset die_offset,
+			    enum dwarf_tag tag,
+			    cooked_index_flag flags,
+			    enum language lang,
+			    const char *name,
+			    cooked_index_entry_ref parent_entry,
+			    dwarf2_per_cu *per_cu)
+{
+  if (tag == DW_TAG_module || tag == DW_TAG_namespace)
+    flags &= ~IS_STATIC;
+  else if (lang == language_cplus
+	   && (tag == DW_TAG_class_type
+	       || tag == DW_TAG_interface_type
+	       || tag == DW_TAG_structure_type
+	       || tag == DW_TAG_union_type
+	       || tag == DW_TAG_enumeration_type
+	       || tag == DW_TAG_enumerator))
+    flags &= ~IS_STATIC;
+  else if (tag_is_type (tag))
+    flags |= IS_STATIC;
+
+  return new (&m_storage) cooked_index_entry (die_offset, tag, flags,
+					      lang, name, parent_entry,
+					      per_cu);
+}
+
+/* See cooked-index.h.  */
+
+cooked_index_entry *
 cooked_index_shard::add (sect_offset die_offset, enum dwarf_tag tag,
 			 cooked_index_flag flags, enum language lang,
-			 const char *name,
-			 cooked_index_entry_ref parent_entry,
-			 dwarf2_per_cu_data *per_cu)
+			 const char *name, cooked_index_entry_ref parent_entry,
+			 dwarf2_per_cu *per_cu)
 {
   cooked_index_entry *result = create (die_offset, tag, flags, lang, name,
 				       parent_entry, per_cu);
@@ -299,8 +343,10 @@ cooked_index_shard::add (sect_offset die_offset, enum dwarf_tag tag,
 /* See cooked-index.h.  */
 
 void
-cooked_index_shard::handle_gnat_encoded_entry (cooked_index_entry *entry,
-					       htab_t gnat_entries)
+cooked_index_shard::handle_gnat_encoded_entry
+     (cooked_index_entry *entry,
+      htab_t gnat_entries,
+      std::vector<cooked_index_entry *> &new_entries)
 {
   /* We decode Ada names in a particular way: operators and wide
      characters are left as-is.  This is done to make name matching a
@@ -328,13 +374,12 @@ cooked_index_shard::handle_gnat_encoded_entry (cooked_index_entry *entry,
       cooked_index_entry *last = (cooked_index_entry *) *slot;
       if (last == nullptr || last->per_cu != entry->per_cu)
 	{
-	  gdb::unique_xmalloc_ptr<char> new_name
-	    = make_unique_xstrndup (name.data (), name.length ());
-	  last = create (entry->die_offset, DW_TAG_namespace,
-			 0, language_ada, new_name.get (), parent,
+	  const char *new_name = m_names.insert (name);
+	  last = create (entry->die_offset, DW_TAG_module,
+			 IS_SYNTHESIZED, language_ada, new_name, parent,
 			 entry->per_cu);
 	  last->canonical = last->name;
-	  m_names.push_back (std::move (new_name));
+	  new_entries.push_back (last);
 	  *slot = last;
 	}
 
@@ -342,9 +387,7 @@ cooked_index_shard::handle_gnat_encoded_entry (cooked_index_entry *entry,
     }
 
   entry->set_parent (parent);
-  auto new_canon = make_unique_xstrndup (tail.data (), tail.length ());
-  entry->canonical = new_canon.get ();
-  m_names.push_back (std::move (new_canon));
+  entry->canonical = m_names.insert (tail);
 }
 
 /* See cooked-index.h.  */
@@ -388,6 +431,7 @@ cooked_index_shard::finalize (const parent_map_map *parent_maps)
 
   htab_up gnat_entries (htab_create_alloc (10, hash_entry, eq_entry,
 					   nullptr, xcalloc, xfree));
+  std::vector<cooked_index_entry *> new_gnat_entries;
 
   for (cooked_index_entry *entry : m_entries)
     {
@@ -404,7 +448,50 @@ cooked_index_shard::finalize (const parent_map_map *parent_maps)
       if ((entry->flags & IS_LINKAGE) != 0)
 	entry->canonical = entry->name;
       else if (entry->lang == language_ada)
-	handle_gnat_encoded_entry (entry, gnat_entries.get ());
+	{
+	  /* Newer versions of GNAT emit DW_TAG_module and use a
+	     hierarchical structure.  In this case, we don't need to
+	     do any extra work.  This can be detected by looking for a
+	     GNAT-encoded name.  */
+	  if (strstr (entry->name, "__") == nullptr)
+	    {
+	      entry->canonical = entry->name;
+
+	      /* If the entry does not have a parent, then there's
+		 nothing extra to do here -- the entry itself is
+		 sufficient.
+
+		 However, if it does have a parent, we have to
+		 synthesize an entry with the full name.  This is
+		 unfortunate, but it's necessary due to how some of
+		 the Ada name-lookup code currently works.  For
+		 example, without this, ada_get_tsd_type will
+		 fail.
+
+		 Eventually it would be good to change the Ada lookup
+		 code, and then remove these entries (and supporting
+		 code in cooked_index_entry::full_name).  */
+	      if (entry->get_parent () != nullptr)
+		{
+		  const char *fullname
+		    = entry->full_name (&m_storage, FOR_ADA_LINKAGE_NAME);
+		  cooked_index_entry *linkage = create (entry->die_offset,
+							entry->tag,
+							(entry->flags
+							 | IS_LINKAGE
+							 | IS_SYNTHESIZED),
+							language_ada,
+							fullname,
+							nullptr,
+							entry->per_cu);
+		  linkage->canonical = fullname;
+		  new_gnat_entries.push_back (linkage);
+		}
+	    }
+	  else
+	    handle_gnat_encoded_entry (entry, gnat_entries.get (),
+				       new_gnat_entries);
+	}
       else if (entry->lang == language_cplus || entry->lang == language_c)
 	{
 	  void **slot = htab_find_slot (seen_names.get (), entry,
@@ -418,10 +505,7 @@ cooked_index_shard::finalize (const parent_map_map *parent_maps)
 	      if (canon_name == nullptr)
 		entry->canonical = entry->name;
 	      else
-		{
-		  entry->canonical = canon_name.get ();
-		  m_names.push_back (std::move (canon_name));
-		}
+		entry->canonical = m_names.insert (std::move (canon_name));
 	      *slot = entry;
 	    }
 	  else
@@ -435,7 +519,12 @@ cooked_index_shard::finalize (const parent_map_map *parent_maps)
 	entry->canonical = entry->name;
     }
 
-  m_names.shrink_to_fit ();
+  /* Make sure any new Ada entries end up in the results.  This isn't
+     done when creating these new entries to avoid invalidating the
+     m_entries iterator used in the foreach above.  */
+  m_entries.insert (m_entries.end (), new_gnat_entries.begin (),
+		    new_gnat_entries.end ());
+
   m_entries.shrink_to_fit ();
   std::sort (m_entries.begin (), m_entries.end (),
 	     [] (const cooked_index_entry *a, const cooked_index_entry *b)
@@ -547,7 +636,7 @@ cooked_index_worker::wait (cooked_state desired_state, bool allow_quit)
     }
 
   /* Only show a given exception a single time.  */
-  std::unordered_set<gdb_exception> seen_exceptions;
+  gdb::unordered_set<gdb_exception> seen_exceptions;
   for (auto &one_result : m_results)
     {
       re_emit_complaints (std::get<1> (one_result));
@@ -692,14 +781,14 @@ cooked_index::~cooked_index ()
 
 /* See cooked-index.h.  */
 
-dwarf2_per_cu_data *
+dwarf2_per_cu *
 cooked_index::lookup (unrelocated_addr addr)
 {
   /* Ensure that the address maps are ready.  */
   wait (cooked_state::MAIN_AVAILABLE, true);
   for (const auto &shard : m_shards)
     {
-      dwarf2_per_cu_data *result = shard->lookup (addr);
+      dwarf2_per_cu *result = shard->lookup (addr);
       if (result != nullptr)
 	return result;
     }
@@ -743,7 +832,7 @@ cooked_index::get_main_name (struct obstack *obstack, enum language *lang)
     return nullptr;
 
   *lang = entry->lang;
-  return entry->full_name (obstack, true);
+  return entry->full_name (obstack, FOR_MAIN);
 }
 
 /* See cooked_index.h.  */
@@ -811,7 +900,7 @@ cooked_index::dump (gdbarch *arch)
       gdb_printf ("    name:       %s\n", entry->name);
       gdb_printf ("    canonical:  %s\n", entry->canonical);
       gdb_printf ("    qualified:  %s\n",
-		  entry->full_name (&temp_storage, false, "::"));
+		  entry->full_name (&temp_storage, 0, "::"));
       gdb_printf ("    DWARF tag:  %s\n", dwarf_tag_name (entry->tag));
       gdb_printf ("    flags:      %s\n", to_string (entry->flags).c_str ());
       gdb_printf ("    DIE offset: %s\n", sect_offset_str (entry->die_offset));
@@ -858,14 +947,13 @@ cooked_index::dump (gdbarch *arch)
 
 	  if (obj != nullptr)
 	    {
-	      const dwarf2_per_cu_data *per_cu
-		= static_cast<const dwarf2_per_cu_data *> (obj);
-	      gdb_printf ("      [%s] ((dwarf2_per_cu_data *) %p)\n",
+	      const dwarf2_per_cu *per_cu
+		= static_cast<const dwarf2_per_cu *> (obj);
+	      gdb_printf ("      [%s] ((dwarf2_per_cu *) %p)\n",
 			  start_addr_str, per_cu);
 	    }
 	  else
-	    gdb_printf ("      [%s] ((dwarf2_per_cu_data *) 0)\n",
-			start_addr_str);
+	    gdb_printf ("      [%s] ((dwarf2_per_cu *) 0)\n", start_addr_str);
 
 	  return 0;
 	});

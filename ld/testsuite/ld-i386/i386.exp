@@ -369,10 +369,15 @@ run_dump_test "load2"
 run_dump_test "load3"
 run_dump_test "load4a"
 run_dump_test "load4b"
+run_dump_test "load4c"
 run_dump_test "load5a"
 run_dump_test "load5b"
+run_dump_test "load5c"
 run_dump_test "load6"
 run_dump_test "load7"
+run_dump_test "load8"
+run_dump_test "load9a"
+run_dump_test "load9b"
 run_dump_test "pr19175"
 run_dump_test "pr19615"
 run_dump_test "pr19636-1a"
@@ -1233,7 +1238,7 @@ if { [isnative]
 	    ] \
 	    [list \
 		"Build ifunc-1a with PIE -z ibtplt" \
-		"-Wl,-z,ibtplt -pie tmpdir/ifunc-1a.o \
+		"-Wl,-z,ibtplt -Wl,-z,lazy -pie tmpdir/ifunc-1a.o \
 		 tmpdir/ifunc-1b.o tmpdir/ifunc-1c.o tmpdir/ifunc-1d.o" \
 		"-Wa,-mx86-used-note=yes" \
 		{ dummy.c } \

@@ -431,7 +431,13 @@ proc test_disable_disassembler_styling { } {
 # disassembled instruction part.
 proc get_single_disassembled_insn {} {
     set disasm_line [capture_command_output "x/1i *main" ""]
-    regexp "^\[^:\]+:\\s*(.*)$" $disasm_line whole_match insn
+    set ret [regexp "^\[^:\]+:\\s*(.*)$" $disasm_line whole_match insn]
+
+    if { $ret == 0 } {
+	fail "failed to disassemble main"
+	return ""
+    }
+
     return $insn
 }
 
@@ -463,7 +469,10 @@ proc test_disassembler_error_handling { } {
 
 	# Disassemble a single instruction and ensure that the output
 	# has styling markers in it.
-	set insn_before [get_single_disassembled_insn]
+	with_test_prefix "before" {
+	    set insn_before [get_single_disassembled_insn]
+	}
+
 	gdb_assert { [regexp "\033" $insn_before] } \
 	    "have style markers when Pygments is working fine"
 
@@ -481,7 +490,10 @@ proc test_disassembler_error_handling { } {
 	    "setup replacement colorize_disasm function" \
 	    true
 
-	set insn_after [get_single_disassembled_insn]
+	with_test_prefix "after" {
+	    set insn_after [get_single_disassembled_insn]
+	}
+
 	gdb_assert { ![regexp "\033" $insn_after] } \
 	    "have no style markers when Pygments is broken"
     }
@@ -678,6 +690,55 @@ proc test_colorsupport_truecolor_only { } {
     }
 }
 
+# Check that styling is auto-disabled when using a "dumb" terminal,
+# and/or when NO_COLOR is set.
+#
+# Also check that the user gets a warning if they enable styling in a
+# "dumb" terminal, but don't get a warning if they are in an "ansi"
+# terminal and NO_COLOR is set.
+proc test_enable_styling_warning { } {
+    save_vars { env(TERM) env(NO_COLOR) } {
+	foreach_with_prefix no_color { set unset } {
+	    if { $no_color eq "set" } {
+		setenv NO_COLOR "xxx"
+	    } else {
+		unset -nocomplain ::env(NO_COLOR)
+	    }
+
+	    foreach_with_prefix term_type { dumb unset ansi } {
+		if { $term_type eq "dumb" } {
+		    setenv TERM dumb
+		} elseif { $term_type eq "unset" } {
+		    unset -nocomplain ::env(TERM)
+		} elseif { $term_type eq "ansi" } {
+		    setenv TERM ansi
+		}
+
+		set styling_on_re "CLI output styling is enabled\\."
+		set styling_off_re "CLI output styling is disabled\\."
+
+		if { $term_type eq "ansi" } {
+		    if { $no_color eq "unset" } {
+			set init_re $styling_on_re
+		    } else {
+			set init_re $styling_off_re
+		    }
+		    set enable_re ""
+		} else {
+		    set init_re $styling_off_re
+		    set enable_re \
+			"warning: The current terminal doesn't support styling\\.  Styled output might not appear as expected\\."
+		}
+
+
+		clean_restart
+		gdb_test "show style enabled" $init_re
+		gdb_test "set style enabled on" $enable_re
+	    }
+	}
+    }
+}
+
 # Check to see if the Python styling of disassembler output is
 # expected or not, this styling requires Python support in GDB, and
 # the Python pygments module to be available.
@@ -718,3 +779,5 @@ test_colorsupport_8color
 test_colorsupport_256color
 test_colorsupport_truecolor
 test_colorsupport_truecolor_only
+
+test_enable_styling_warning

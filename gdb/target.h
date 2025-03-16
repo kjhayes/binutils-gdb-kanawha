@@ -1162,8 +1162,12 @@ struct target_ops
 			       CORE_ADDR memaddr, ULONGEST size)
       TARGET_DEFAULT_FUNC (default_verify_memory);
 
-    /* Return the address of the start of the Thread Information Block
-       a Windows OS specific feature.  */
+    /* Set *ADDR to the address of the start of the Thread Information
+       Block (TIB) for thread PTID.  Return true on success and false
+       otherwise.
+
+       ADDR may be nullptr, in which case the checks will be done but
+       the result will be discarded.  */
     virtual bool get_tib_address (ptid_t ptid, CORE_ADDR *addr)
       TARGET_DEFAULT_NORETURN (tcomplain ());
 
@@ -1376,6 +1380,25 @@ struct target_ops
     /* Return the x86 XSAVE extended state area layout.  */
     virtual x86_xsave_layout fetch_x86_xsave_layout ()
       TARGET_DEFAULT_RETURN (x86_xsave_layout ());
+
+    /* Return true if the target supports displaced stepping for THREAD.  */
+    virtual bool supports_displaced_step (thread_info *thread)
+      TARGET_DEFAULT_FUNC (default_supports_displaced_step);
+
+    /* See documentation of gdbarch_displaced_step_prepare.  */
+    virtual displaced_step_prepare_status displaced_step_prepare (thread_info *thread,
+								  CORE_ADDR &displaced_pc)
+      TARGET_DEFAULT_FUNC (default_displaced_step_prepare);
+
+    /* See documentation of gdbarch_displaced_step_finish.  */
+    virtual displaced_step_finish_status displaced_step_finish
+      (thread_info *thread, const target_waitstatus &status)
+      TARGET_DEFAULT_FUNC (default_displaced_step_finish);
+
+    /* See documentation of gdbarch_displaced_step_restore_all_in_ptid.  */
+    virtual void displaced_step_restore_all_in_ptid (inferior *parent_inf,
+						     ptid_t child_ptid)
+      TARGET_DEFAULT_FUNC (default_displaced_step_restore_all_in_ptid);
   };
 
 /* Deleter for std::unique_ptr.  See comments in
@@ -2338,6 +2361,8 @@ extern void target_set_trace_buffer_size (LONGEST val);
 extern bool target_set_trace_notes (const char *user, const char *notes,
 				    const char *stopnotes);
 
+/* A wrapper that calls get_tib_address on the top target of the
+   current inferior.  */
 extern bool target_get_tib_address (ptid_t ptid, CORE_ADDR *addr);
 
 extern void target_set_permissions ();

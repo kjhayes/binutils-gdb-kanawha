@@ -32,6 +32,7 @@
 #include "value.h"
 #include "record.h"
 #include "extract-store-integer.h"
+#include "producer.h"
 
 #include "complaints.h"
 #include "dwarf2/frame.h"
@@ -44,7 +45,6 @@
 #include "gdbsupport/selftest.h"
 #include "selftest-arch.h"
 #endif
-#include <unordered_map>
 
 #include <algorithm>
 
@@ -104,7 +104,7 @@ struct dwarf2_cie
 
 /* The CIE table is used to find CIEs during parsing, but then
    discarded.  It maps from the CIE's offset to the CIE.  */
-typedef std::unordered_map<ULONGEST, dwarf2_cie *> dwarf2_cie_table;
+using dwarf2_cie_table = gdb::unordered_map<ULONGEST, dwarf2_cie *>;
 
 /* Frame Description Entry (FDE).  */
 
@@ -574,7 +574,7 @@ execute_cfa_program_test (struct gdbarch *gdbarch)
   SELF_CHECK (fs.regs.prev == NULL);
 }
 
-} // namespace selftests
+} /* namespace selftests */
 #endif /* GDB_SELF_TEST */
 
 
@@ -772,9 +772,8 @@ dwarf2_frame_find_quirks (struct dwarf2_frame_state *fs,
 
 int
 dwarf2_fetch_cfa_info (struct gdbarch *gdbarch, CORE_ADDR pc,
-		       struct dwarf2_per_cu_data *data,
-		       int *regnum_out, LONGEST *offset_out,
-		       CORE_ADDR *text_offset_out,
+		       dwarf2_per_cu *data, int *regnum_out,
+		       LONGEST *offset_out, CORE_ADDR *text_offset_out,
 		       const gdb_byte **cfa_start_out,
 		       const gdb_byte **cfa_end_out)
 {

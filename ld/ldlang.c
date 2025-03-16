@@ -2827,8 +2827,10 @@ lang_add_section (lang_statement_list_type *ptr,
       /* Unfortunately GNU ld has managed to evolve two different
 	 meanings to NOLOAD in scripts.  ELF gets a .bss style noload,
 	 alloc, no contents section.  All others get a noload, noalloc
-	 section.  */
-      if (bfd_get_flavour (link_info.output_bfd) == bfd_target_elf_flavour)
+	 section.  Unlike a .bss style section, if a note section is
+	 marked as NOLOAD, also clear SEC_ALLOC.  */
+      if (bfd_get_flavour (link_info.output_bfd) == bfd_target_elf_flavour
+	  && elf_section_type (section) != SHT_NOTE)
 	flags &= ~SEC_HAS_CONTENTS;
       else
 	flags &= ~SEC_ALLOC;
@@ -8689,6 +8691,7 @@ lang_add_wild (struct wildcard_spec *filespec,
   new_stmt = new_stat (lang_wild_statement, stat_ptr);
   new_stmt->filename = NULL;
   new_stmt->filenames_sorted = false;
+  new_stmt->filenames_reversed = false;
   new_stmt->any_specs_sorted = any_specs_sorted;
   new_stmt->section_flag_list = NULL;
   new_stmt->exclude_name_list = NULL;
@@ -8696,9 +8699,9 @@ lang_add_wild (struct wildcard_spec *filespec,
     {
       new_stmt->filename = filespec->name;
       new_stmt->filenames_sorted = (filespec->sorted == by_name || filespec->reversed);
+      new_stmt->filenames_reversed = filespec->reversed;
       new_stmt->section_flag_list = filespec->section_flag_list;
       new_stmt->exclude_name_list = filespec->exclude_name_list;
-      new_stmt->filenames_reversed = filespec->reversed;
     }
   new_stmt->section_list = section_list;
   new_stmt->keep_sections = keep_sections;

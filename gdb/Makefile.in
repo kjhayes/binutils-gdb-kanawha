@@ -1097,6 +1097,8 @@ COMMON_SFILES = \
 	dwarf2/attribute.c \
 	dwarf2/comp-unit-head.c \
 	dwarf2/cooked-index.c \
+	dwarf2/cooked-index-storage.c \
+	dwarf2/cooked-indexer.c \
 	dwarf2/cu.c \
 	dwarf2/die.c \
 	dwarf2/dwz.c \
@@ -1110,6 +1112,7 @@ COMMON_SFILES = \
 	dwarf2/line-header.c \
 	dwarf2/loc.c \
 	dwarf2/macro.c \
+	dwarf2/parent-map.c \
 	dwarf2/read.c \
 	dwarf2/read-debug-names.c \
 	dwarf2/read-gdb-index.c \
@@ -1353,6 +1356,8 @@ HFILES_NO_SRCDIR = \
 	dummy-frame.h \
 	dwarf2/aranges.h \
 	dwarf2/cooked-index.h \
+	dwarf2/cooked-index-storage.h \
+	dwarf2/cooked-indexer.h \
 	dwarf2/cu.h \
 	dwarf2/frame-tailcall.h \
 	dwarf2/frame.h \
@@ -2347,17 +2352,14 @@ run: Makefile
 jit-reader.h: $(srcdir)/jit-reader.in config.status
 	$(ECHO_GEN) $(SHELL) config.status $(SILENT_FLAG) $@
 
-gcore: $(srcdir)/gcore.in config.status
+gstack.in gcore.in: %.in : $(srcdir)/%-1.in config.status
 	$(ECHO_GEN) $(SHELL) config.status $(SILENT_FLAG) $@
 
-gstack: gstack.in version.c
+gstack gcore: % : %.in version.c
 	$(ECHO_GEN) \
 	vv=`grep 'version\[\] = ' version.c | grep -o '".*"' | tr -d \"`; \
 	sed -e "s,@VERSION@,$$vv," $< > $@
 	@chmod +x $@
-
-gstack.in: $(srcdir)/gstack-1.in config.status
-	$(ECHO_GEN) $(SHELL) config.status $(SILENT_FLAG) $@
 
 gdb-gdb.py: $(srcdir)/gdb-gdb.py.in config.status
 	$(ECHO_GEN) $(SHELL) config.status $(SILENT_FLAG) $@

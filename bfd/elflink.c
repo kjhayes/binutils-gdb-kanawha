@@ -3384,12 +3384,9 @@ _bfd_elf_adjust_dynamic_copy (struct bfd_link_info *info,
        --power_of_two;
     }
 
-  if (power_of_two > bfd_section_alignment (dynbss))
-    {
-      /* Adjust the section alignment if needed.  */
-      if (!bfd_set_section_alignment (dynbss, power_of_two))
-	return false;
-    }
+  /* Adjust the section alignment if needed.  */
+  if (!bfd_link_align_section (dynbss, power_of_two))
+    return false;
 
   /* We make sure that the symbol will be aligned properly.  */
   dynbss->size = BFD_ALIGN (dynbss->size, mask + 1);
@@ -3609,7 +3606,7 @@ _bfd_elf_tls_setup (bfd *obfd, struct bfd_link_info *info)
   /* Ensure the alignment of the first section (usually .tdata) is the largest
      alignment, so that the tls segment starts aligned.  */
   if (tls != NULL)
-    tls->alignment_power = align;
+    (void) bfd_link_align_section (tls, align);
 
   return tls;
 }
@@ -4362,8 +4359,8 @@ elf_link_add_to_first_hash (bfd *abfd, struct bfd_link_info *info,
     = ((struct elf_link_first_hash_entry *)
        bfd_hash_lookup (htab->first_hash, name, true, copy));
   if (e == NULL)
-    info->callbacks->einfo
-      (_("%F%P: %pB: failed to add %s to first hash\n"), abfd, name);
+    info->callbacks->fatal
+      (_("%P: %pB: failed to add %s to first hash\n"), abfd, name);
 
   if (e->abfd == NULL)
     /* Store ABFD in abfd.  */
@@ -4430,8 +4427,8 @@ elf_link_add_object_symbols (bfd *abfd, struct bfd_link_info *info)
 	      || !bfd_hash_table_init
 		   (htab->first_hash, elf_link_first_hash_newfunc,
 		    sizeof (struct elf_link_first_hash_entry)))
-	    info->callbacks->einfo
-	      (_("%F%P: first_hash failed to create: %E\n"));
+	    info->callbacks->fatal
+	      (_("%P: first_hash failed to create: %E\n"));
 	}
     }
   else
@@ -12613,9 +12610,6 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
   size_t relr_entsize;
   asection *reldyn = 0;
   bfd_size_type amt;
-  asection *attr_section = NULL;
-  bfd_vma attr_size = 0;
-  const char *std_attrs_section;
   struct elf_link_hash_table *htab = elf_hash_table (info);
   bool sections_removed;
 
@@ -12661,12 +12655,12 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
      sections from the link, and set the contents of the output
      section.  */
   sections_removed = false;
-  std_attrs_section = get_elf_backend_data (abfd)->obj_attrs_section;
+  const char *obj_attrs_section = get_elf_backend_data (abfd)->obj_attrs_section;
   for (o = abfd->sections; o != NULL; o = o->next)
     {
       bool remove_section = false;
 
-      if ((std_attrs_section && strcmp (o->name, std_attrs_section) == 0)
+      if ((obj_attrs_section && strcmp (o->name, obj_attrs_section) == 0)
 	  || strcmp (o->name, ".gnu.attributes") == 0)
 	{
 	  for (p = o->map_head.link_order; p != NULL; p = p->next)
@@ -12681,12 +12675,16 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
 	      input_section->flags &= ~SEC_HAS_CONTENTS;
 	    }
 
-	  attr_size = bfd_elf_obj_attr_size (abfd);
-	  bfd_set_section_size (o, attr_size);
 	  /* Skip this section later on.  */
 	  o->map_head.link_order = NULL;
-	  if (attr_size)
-	    attr_section = o;
+
+	  bfd_vma attr_size = bfd_elf_obj_attr_size (abfd);
+	  /* Once ELF headers have been written, the size of a section is
+	     frozen. We need to set the size of the attribute section before
+	     _bfd_elf_compute_section_file_positions.  */
+	  bfd_set_section_size (o, attr_size);
+	  if (attr_size > 0)
+	    elf_obj_build_attributes (abfd) = o;
 	  else
 	    remove_section = true;
 	}
@@ -13122,8 +13120,8 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
   if (info->enable_dt_relr
       && bed->finish_relative_relocs
       && !bed->finish_relative_relocs (info))
-    info->callbacks->einfo
-      (_("%F%P: %pB: failed to finish relative relocations\n"), abfd);
+    info->callbacks->fatal
+      (_("%P: %pB: failed to finish relative relocations\n"), abfd);
 
   /* Since ELF permits relocations to be against local symbols, we
      must have the local symbols available when we do the relocations.
@@ -13801,20 +13799,13 @@ bfd_elf_final_link (bfd *abfd, struct bfd_link_info *info)
   if (! _bfd_elf_write_section_sframe (abfd, info))
     goto error_return;
 
+  if (! _bfd_elf_write_section_build_attributes (abfd, info))
+    goto error_ret2;
+
   if (info->callbacks->emit_ctf)
       info->callbacks->emit_ctf ();
 
   elf_final_link_free (abfd, &flinfo);
-
-  if (attr_section)
-    {
-      bfd_byte *contents = (bfd_byte *) bfd_malloc (attr_size);
-      if (contents == NULL)
-	goto error_ret2;
-      bfd_elf_set_obj_attr_contents (abfd, contents, attr_size);
-      bfd_set_section_contents (abfd, attr_section, contents, 0, attr_size);
-      free (contents);
-    }
 
   if (info->unique_symbol)
     bfd_hash_table_free (&flinfo.local_hash_table);
@@ -14292,7 +14283,7 @@ _bfd_elf_gc_mark_extra_sections (struct bfd_link_info *info,
 	  else if (strcmp (bfd_section_name (isec),
 			   "__patchable_function_entries") == 0
 		   && elf_linked_to_section (isec) == NULL)
-	      info->callbacks->einfo (_("%F%P: %pB(%pA): error: "
+	      info->callbacks->fatal (_("%P: %pB(%pA): error: "
 					"need linked-to section "
 					"for --gc-sections\n"),
 				      isec->owner, isec);
@@ -15469,7 +15460,7 @@ _bfd_elf_section_already_linked (bfd *abfd,
 
   /* This is the first section with this name.  Record it.  */
   if (!bfd_section_already_linked_table_insert (already_linked_list, sec))
-    info->callbacks->einfo (_("%F%P: already_linked_table: %E\n"));
+    info->callbacks->fatal (_("%P: already_linked_table: %E\n"));
   return sec->output_section == bfd_abs_section_ptr;
 }
 

@@ -2291,7 +2291,7 @@ aarch64_canonicalize_syscall (enum aarch64_syscall syscall_number)
       SYSCALL_MAP (move_pages);
       UNSUPPORTED_SYSCALL_MAP (rt_tgsigqueueinfo);
       UNSUPPORTED_SYSCALL_MAP (perf_event_open);
-      UNSUPPORTED_SYSCALL_MAP (accept4);
+      SYSCALL_MAP (accept4);
       UNSUPPORTED_SYSCALL_MAP (recvmmsg);
 
       SYSCALL_MAP (wait4);
@@ -2972,7 +2972,7 @@ aarch64_linux_ltag_tests (void)
     }
 }
 
-} // namespace selftests
+} /* namespace selftests */
 #endif /* GDB_SELF_TEST */
 
 void _initialize_aarch64_linux_tdep ();

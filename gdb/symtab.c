@@ -1911,7 +1911,7 @@ lookup_name_info::match_any ()
 {
   /* Lookup any symbol that "" would complete.  I.e., this matches all
      symbol names.  */
-  static const lookup_name_info lookup_name ("", symbol_name_match_type::FULL,
+  static const lookup_name_info lookup_name ("", symbol_name_match_type::WILD,
 					     true);
 
   return lookup_name;
@@ -4910,7 +4910,7 @@ global_symbol_searcher::expand_symtabs
     {
       return file_matches (filename, m_filenames, basenames);
     };
-  gdb::function_view<expand_symtabs_file_matcher_ftype> file_matcher = nullptr;
+  expand_symtabs_file_matcher file_matcher = nullptr;
   if (!m_filenames.empty ())
     file_matcher = do_file_match;
 
@@ -6634,31 +6634,6 @@ main_language (void)
     find_main_name ();
 
   return info->language_of_main;
-}
-
-/* Return 1 if the supplied producer string matches the ARM RealView
-   compiler (armcc).  */
-
-bool
-producer_is_realview (const char *producer)
-{
-  static const char *const arm_idents[] = {
-    "ARM C Compiler, ADS",
-    "Thumb C Compiler, ADS",
-    "ARM C++ Compiler, ADS",
-    "Thumb C++ Compiler, ADS",
-    "ARM/Thumb C/C++ Compiler, RVCT",
-    "ARM C/C++ Compiler, RVCT"
-  };
-
-  if (producer == NULL)
-    return false;
-
-  for (const char *ident : arm_idents)
-    if (startswith (producer, ident))
-      return true;
-
-  return false;
 }
 
 

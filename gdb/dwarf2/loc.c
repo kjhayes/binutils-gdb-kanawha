@@ -43,14 +43,13 @@
 #include "compile/compile.h"
 #include <algorithm>
 #include <vector>
-#include <unordered_set>
 #include "gdbsupport/underlying.h"
 #include "gdbsupport/byte-vector.h"
 #include "extract-store-integer.h"
 
 static struct value *dwarf2_evaluate_loc_desc_full
   (struct type *type, const frame_info_ptr &frame, const gdb_byte *data,
-   size_t size, dwarf2_per_cu_data *per_cu, dwarf2_per_objfile *per_objfile,
+   size_t size, dwarf2_per_cu *per_cu, dwarf2_per_objfile *per_objfile,
    struct type *subobj_type, LONGEST subobj_byte_offset, bool as_lval = true);
 
 /* Until these have formal names, we define these here.
@@ -154,7 +153,7 @@ decode_debug_loc_addresses (const gdb_byte *loc_ptr, const gdb_byte *buf_end,
    The result indicates the kind of entry found.  */
 
 static enum debug_loc_kind
-decode_debug_loclists_addresses (dwarf2_per_cu_data *per_cu,
+decode_debug_loclists_addresses (dwarf2_per_cu *per_cu,
 				 dwarf2_per_objfile *per_objfile,
 				 const gdb_byte *loc_ptr,
 				 const gdb_byte *buf_end,
@@ -289,7 +288,7 @@ decode_debug_loclists_addresses (dwarf2_per_cu_data *per_cu,
    The result indicates the kind of entry found.  */
 
 static enum debug_loc_kind
-decode_debug_loc_dwo_addresses (dwarf2_per_cu_data *per_cu,
+decode_debug_loc_dwo_addresses (dwarf2_per_cu *per_cu,
 				dwarf2_per_objfile *per_objfile,
 				const gdb_byte *loc_ptr,
 				const gdb_byte *buf_end,
@@ -389,12 +388,12 @@ dwarf2_find_location_expression (const dwarf2_loclist_baton *baton,
       enum debug_loc_kind kind;
       const gdb_byte *new_ptr = NULL; /* init for gcc -Wall */
 
-      if (baton->per_cu->version () < 5 && baton->from_dwo)
+      if (baton->dwarf_version < 5 && baton->from_dwo)
 	kind = decode_debug_loc_dwo_addresses (baton->per_cu,
 					       baton->per_objfile,
 					       loc_ptr, buf_end, &new_ptr,
 					       &low, &high, byte_order);
-      else if (baton->per_cu->version () < 5)
+      else if (baton->dwarf_version < 5)
 	kind = decode_debug_loc_addresses (loc_ptr, buf_end, &new_ptr,
 					   &low, &high,
 					   byte_order, addr_size,
@@ -445,7 +444,7 @@ dwarf2_find_location_expression (const dwarf2_loclist_baton *baton,
 	  high = (unrelocated_addr) ((CORE_ADDR) high + (CORE_ADDR) base_address);
 	}
 
-      if (baton->per_cu->version () < 5)
+      if (baton->dwarf_version < 5)
 	{
 	  length = extract_unsigned_integer (loc_ptr, 2, byte_order);
 	  loc_ptr += 2;
@@ -795,7 +794,7 @@ func_verify_no_selftailcall (struct gdbarch *gdbarch, CORE_ADDR verify_addr)
   std::vector<CORE_ADDR> todo;
 
   /* Track here CORE_ADDRs which were already visited.  */
-  std::unordered_set<CORE_ADDR> addr_hash;
+  gdb::unordered_set<CORE_ADDR> addr_hash;
 
   todo.push_back (verify_addr);
   while (!todo.empty ())
@@ -964,7 +963,7 @@ call_site_find_chain_2
      (struct gdbarch *gdbarch,
       gdb::unique_xmalloc_ptr<struct call_site_chain> *resultp,
       std::vector<struct call_site *> &chain,
-      std::unordered_set<CORE_ADDR> &addr_hash,
+      gdb::unordered_set<CORE_ADDR> &addr_hash,
       struct call_site *call_site,
       CORE_ADDR callee_pc)
 {
@@ -1047,7 +1046,7 @@ call_site_find_chain_1 (struct gdbarch *gdbarch, CORE_ADDR caller_pc,
 		 paddress (gdbarch, save_callee_pc));
 
   /* Mark CALL_SITEs so we do not visit the same ones twice.  */
-  std::unordered_set<CORE_ADDR> addr_hash;
+  gdb::unordered_set<CORE_ADDR> addr_hash;
 
   /* Do not push CALL_SITE to CHAIN.  Push there only the first tail call site
      at the target's function.  All the possible tail call sites in the
@@ -1138,7 +1137,7 @@ struct call_site_parameter *
 dwarf_expr_reg_to_entry_parameter (const frame_info_ptr &initial_frame,
 				   call_site_parameter_kind kind,
 				   call_site_parameter_u kind_u,
-				   dwarf2_per_cu_data **per_cu_return,
+				   dwarf2_per_cu **per_cu_return,
 				   dwarf2_per_objfile **per_objfile_return)
 {
   CORE_ADDR func_addr, caller_pc;
@@ -1260,7 +1259,7 @@ static struct value *
 dwarf_entry_parameter_to_value (struct call_site_parameter *parameter,
 				CORE_ADDR deref_size, struct type *type,
 				const frame_info_ptr &caller_frame,
-				dwarf2_per_cu_data *per_cu,
+				dwarf2_per_cu *per_cu,
 				dwarf2_per_objfile *per_objfile)
 {
   const gdb_byte *data_src;
@@ -1344,7 +1343,7 @@ value_of_dwarf_reg_entry (struct type *type, const frame_info_ptr &frame,
   frame_info_ptr caller_frame = get_prev_frame (frame);
   struct value *outer_val, *target_val, *val;
   struct call_site_parameter *parameter;
-  dwarf2_per_cu_data *caller_per_cu;
+  dwarf2_per_cu *caller_per_cu;
   dwarf2_per_objfile *caller_per_objfile;
 
   parameter = dwarf_expr_reg_to_entry_parameter (frame, kind, kind_u,
@@ -1417,7 +1416,7 @@ value_of_dwarf_block_entry (struct type *type, const frame_info_ptr &frame,
 
 static struct value *
 fetch_const_value_from_synthetic_pointer (sect_offset die, LONGEST byte_offset,
-					  dwarf2_per_cu_data *per_cu,
+					  dwarf2_per_cu *per_cu,
 					  dwarf2_per_objfile *per_objfile,
 					  struct type *type)
 {
@@ -1450,7 +1449,7 @@ fetch_const_value_from_synthetic_pointer (sect_offset die, LONGEST byte_offset,
 
 struct value *
 indirect_synthetic_pointer (sect_offset die, LONGEST byte_offset,
-			    dwarf2_per_cu_data *per_cu,
+			    dwarf2_per_cu *per_cu,
 			    dwarf2_per_objfile *per_objfile,
 			    const frame_info_ptr &frame, struct type *type,
 			    bool resolve_abstract_p)
@@ -1494,7 +1493,7 @@ indirect_synthetic_pointer (sect_offset die, LONGEST byte_offset,
 static struct value *
 dwarf2_evaluate_loc_desc_full (struct type *type, const frame_info_ptr &frame,
 			       const gdb_byte *data, size_t size,
-			       dwarf2_per_cu_data *per_cu,
+			       dwarf2_per_cu *per_cu,
 			       dwarf2_per_objfile *per_objfile,
 			       struct type *subobj_type,
 			       LONGEST subobj_byte_offset,
@@ -1559,7 +1558,7 @@ dwarf2_evaluate_loc_desc_full (struct type *type, const frame_info_ptr &frame,
 struct value *
 dwarf2_evaluate_loc_desc (struct type *type, const frame_info_ptr &frame,
 			  const gdb_byte *data, size_t size,
-			  dwarf2_per_cu_data *per_cu,
+			  dwarf2_per_cu *per_cu,
 			  dwarf2_per_objfile *per_objfile, bool as_lval)
 {
   return dwarf2_evaluate_loc_desc_full (type, frame, data, size, per_cu,
@@ -1590,7 +1589,7 @@ dwarf2_locexpr_baton_eval (const struct dwarf2_locexpr_baton *dlbaton,
     return 0;
 
   dwarf2_per_objfile *per_objfile = dlbaton->per_objfile;
-  dwarf2_per_cu_data *per_cu = dlbaton->per_cu;
+  dwarf2_per_cu *per_cu = dlbaton->per_cu;
   dwarf_expr_context ctx (per_objfile, per_cu->addr_size ());
 
   value *result;
@@ -1788,7 +1787,7 @@ dwarf2_compile_property_to_c (string_file *stream,
   const dwarf2_property_baton *baton = prop->baton ();
   const gdb_byte *data;
   size_t size;
-  dwarf2_per_cu_data *per_cu;
+  dwarf2_per_cu *per_cu;
   dwarf2_per_objfile *per_objfile;
 
   if (prop->kind () == PROP_LOCEXPR)
@@ -1821,7 +1820,7 @@ dwarf2_compile_property_to_c (string_file *stream,
 
 static enum symbol_needs_kind
 dwarf2_get_symbol_read_needs (gdb::array_view<const gdb_byte> expr,
-			      dwarf2_per_cu_data *per_cu,
+			      dwarf2_per_cu *per_cu,
 			      dwarf2_per_objfile *per_objfile,
 			      bfd_endian byte_order,
 			      int addr_size,
@@ -1841,7 +1840,7 @@ dwarf2_get_symbol_read_needs (gdb::array_view<const gdb_byte> expr,
   std::vector<const gdb_byte *> ops_to_visit;
 
   /* Operations already visited.  */
-  std::unordered_set<const gdb_byte *> visited_ops;
+  gdb::unordered_set<const gdb_byte *> visited_ops;
 
   /* Insert OP in OPS_TO_VISIT if it is within the expression's range and
      hasn't been visited yet.  */
@@ -2372,8 +2371,7 @@ access_memory (struct gdbarch *arch, struct agent_expr *expr, ULONGEST nbits)
 static void
 dwarf2_compile_expr_to_ax (struct agent_expr *expr, struct axs_value *loc,
 			   unsigned int addr_size, const gdb_byte *op_ptr,
-			   const gdb_byte *op_end,
-			   dwarf2_per_cu_data *per_cu,
+			   const gdb_byte *op_end, dwarf2_per_cu *per_cu,
 			   dwarf2_per_objfile *per_objfile)
 {
   gdbarch *arch = expr->gdbarch;
@@ -3135,7 +3133,7 @@ locexpr_regname (struct gdbarch *gdbarch, int dwarf_regnum)
 
 static const gdb_byte *
 locexpr_describe_location_piece (struct symbol *symbol, struct ui_file *stream,
-				 CORE_ADDR addr, dwarf2_per_cu_data *per_cu,
+				 CORE_ADDR addr, dwarf2_per_cu *per_cu,
 				 dwarf2_per_objfile *per_objfile,
 				 const gdb_byte *data, const gdb_byte *end,
 				 unsigned int addr_size)
@@ -3315,7 +3313,7 @@ disassemble_dwarf_expression (struct ui_file *stream,
 			      int offset_size, const gdb_byte *start,
 			      const gdb_byte *data, const gdb_byte *end,
 			      int indent, int all,
-			      dwarf2_per_cu_data *per_cu,
+			      dwarf2_per_cu *per_cu,
 			      dwarf2_per_objfile *per_objfile)
 {
   while (data < end
@@ -3721,7 +3719,7 @@ locexpr_describe_location_1 (struct symbol *symbol, CORE_ADDR addr,
 			     struct ui_file *stream,
 			     const gdb_byte *data, size_t size,
 			     unsigned int addr_size,
-			     int offset_size, dwarf2_per_cu_data *per_cu,
+			     int offset_size, dwarf2_per_cu *per_cu,
 			     dwarf2_per_objfile *per_objfile)
 {
   const gdb_byte *end = data + size;
@@ -3978,12 +3976,12 @@ loclist_describe_location (struct symbol *symbol, CORE_ADDR addr,
       enum debug_loc_kind kind;
       const gdb_byte *new_ptr = NULL; /* init for gcc -Wall */
 
-      if (dlbaton->per_cu->version () < 5 && dlbaton->from_dwo)
+      if (dlbaton->dwarf_version < 5 && dlbaton->from_dwo)
 	kind = decode_debug_loc_dwo_addresses (dlbaton->per_cu,
 					       per_objfile,
 					       loc_ptr, buf_end, &new_ptr,
 					       &low, &high, byte_order);
-      else if (dlbaton->per_cu->version () < 5)
+      else if (dlbaton->dwarf_version < 5)
 	kind = decode_debug_loc_addresses (loc_ptr, buf_end, &new_ptr,
 					   &low, &high,
 					   byte_order, addr_size,
@@ -4033,7 +4031,7 @@ loclist_describe_location (struct symbol *symbol, CORE_ADDR addr,
       CORE_ADDR low_reloc = per_objfile->relocate (low);
       CORE_ADDR high_reloc = per_objfile->relocate (high);
 
-      if (dlbaton->per_cu->version () < 5)
+      if (dlbaton->dwarf_version < 5)
 	 {
 	   length = extract_unsigned_integer (loc_ptr, 2, byte_order);
 	   loc_ptr += 2;

@@ -18,7 +18,7 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
    MA 02110-1301, USA.  */
-
+
 #ifndef gmon_io_h
 #define gmon_io_h
 
@@ -28,6 +28,7 @@
 
 extern int gmon_input;		/* What input did we see?  */
 extern int gmon_file_version;	/* File version are we dealing with.  */
+extern bool gmon_histograms_first;
 
 extern int gmon_io_read_vma (FILE *ifp, bfd_vma *valp);
 extern int gmon_io_read_32 (FILE *ifp, unsigned int *valp);
