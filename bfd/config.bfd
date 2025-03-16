@@ -237,6 +237,13 @@ esac
 case "${targ}" in
 # START OF targmatch.h
 #ifdef BFD64
+  x86_64-*-kanawha*)
+    targ_defvec=x86_64_elf64_vec
+    targ_selvecs="i386_elf32_vec"
+    want64=true
+    ;;
+#endif
+#ifdef BFD64
   aarch64-*-darwin*)
     targ_defvec=aarch64_mach_o_vec
     targ_selvecs="arm_mach_o_vec mach_o_le_vec mach_o_be_vec mach_o_fat_vec"

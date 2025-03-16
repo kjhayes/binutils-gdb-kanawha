@@ -82,6 +82,10 @@ fi
 # Please try to keep this table more or less in alphabetic order - it
 # makes it much easier to lookup a specific archictecture.
 case "${targ}" in
+# To the comment above: No.
+x86_64-*-kanawha*)	targ_emul=elf_x86_64_kanawha
+			targ_extra_emuls="elf_x86_64 elf_i386"
+			;;
 aarch64_be-*-elf)	targ_emul=aarch64elfb
 			targ_extra_emuls="aarch64elf aarch64elf32 aarch64elf32b armelfb armelf"
 			;;

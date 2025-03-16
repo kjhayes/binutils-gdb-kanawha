@@ -2025,6 +2025,7 @@ case $os in
 	| ironclad* \
 	| isc* \
 	| its* \
+        | kanawha* \
 	| l4re* \
 	| libertybsd* \
 	| lites* \
